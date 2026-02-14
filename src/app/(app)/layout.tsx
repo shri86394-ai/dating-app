@@ -22,7 +22,7 @@ export default async function AppLayout({
   return (
     <div className="min-h-dvh bg-background pb-20">
       <main>{children}</main>
-      <BottomNav />
+      <BottomNav isAdmin={user.role === "ADMIN"} />
     </div>
   );
 }

@@ -36,6 +36,7 @@ import {
   Camera,
   Edit2,
   Loader2,
+  LogOut,
   MapPin,
   Save,
   Trash2,
@@ -72,8 +73,13 @@ export function ProfileClient({ profile, answers }: ProfileClientProps) {
   const router = useRouter();
   const [editing, setEditing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [notifications, setNotifications] = useState(true);
+
+  // Photo upload state
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [localPhotos, setLocalPhotos] = useState<string[]>(profile.photos);
 
   // Editable state
   const [name, setName] = useState(profile.name);
@@ -136,6 +142,77 @@ export function ProfileClient({ profile, answers }: ProfileClientProps) {
       toast.error("Something went wrong");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Even if the API call fails, clear the cookie client-side
+    }
+    document.cookie =
+      "blackout_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    router.push("/login");
+  }
+
+  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (localPhotos.length + files.length > 6) {
+      toast.error("Maximum 6 photos allowed");
+      return;
+    }
+
+    setPhotoUploading(true);
+    try {
+      const newPhotos: string[] = [];
+      for (const file of files) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        newPhotos.push(dataUrl);
+      }
+
+      const updatedPhotos = [...localPhotos, ...newPhotos];
+
+      const res = await fetch("/api/users/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photos: updatedPhotos }),
+      });
+
+      if (res.ok) {
+        setLocalPhotos(updatedPhotos);
+        toast.success("Photo uploaded!");
+        router.refresh();
+      } else {
+        toast.error("Failed to upload photo");
+      }
+    } catch {
+      toast.error("Something went wrong uploading photo");
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
+  async function handleRemovePhoto(index: number) {
+    const updatedPhotos = localPhotos.filter((_, i) => i !== index);
+    const res = await fetch("/api/users/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photos: updatedPhotos }),
+    });
+
+    if (res.ok) {
+      setLocalPhotos(updatedPhotos);
+      toast.success("Photo removed");
+      router.refresh();
+    } else {
+      toast.error("Failed to remove photo");
     }
   }
 
@@ -396,30 +473,49 @@ export function ProfileClient({ profile, answers }: ProfileClientProps) {
           <CardTitle className="text-sm font-medium text-muted-foreground">
             Photos
           </CardTitle>
-          <Button variant="ghost" size="sm">
-            <Edit2 className="h-4 w-4" />
-          </Button>
+          {photoUploading && (
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          )}
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-3 gap-2">
-            {profile.photos.map((photo, i) => (
+            {localPhotos.map((photo, i) => (
               <div
                 key={i}
-                className="aspect-square overflow-hidden rounded-lg bg-muted"
+                className="relative aspect-square overflow-hidden rounded-lg bg-muted group"
               >
                 <img
                   src={photo}
                   alt={`Photo ${i + 1}`}
                   className="h-full w-full object-cover"
                 />
+                <button
+                  onClick={() => handleRemovePhoto(i)}
+                  className="absolute top-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
+                >
+                  &times;
+                </button>
               </div>
             ))}
-            {profile.photos.length < 6 && (
-              <div className="flex aspect-square items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 bg-muted/50">
+            {localPhotos.length < 6 && (
+              <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 bg-muted/50 hover:border-primary/50 hover:bg-muted transition-colors">
                 <Camera className="h-6 w-6 text-muted-foreground" />
-              </div>
+                <span className="mt-1 text-xs text-muted-foreground">Add</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                />
+              </label>
             )}
           </div>
+          {localPhotos.length === 0 && (
+            <p className="mt-2 text-xs text-muted-foreground text-center">
+              Tap the + to add your first photo
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -468,6 +564,22 @@ export function ProfileClient({ profile, answers }: ProfileClientProps) {
               onCheckedChange={setNotifications}
             />
           </div>
+
+          <Separator />
+
+          <Button
+            variant="ghost"
+            className="w-full justify-start"
+            onClick={handleLogout}
+            disabled={loggingOut}
+          >
+            {loggingOut ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <LogOut className="mr-2 h-4 w-4" />
+            )}
+            {loggingOut ? "Logging out..." : "Log Out"}
+          </Button>
 
           <Separator />
 

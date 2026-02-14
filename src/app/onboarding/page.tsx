@@ -201,7 +201,7 @@ export default function OnboardingPage() {
         preference,
         bio: bio.trim(),
         interests: selectedInterests,
-        photos: [], // Photo upload to cloud would go here
+        photos: photoPreview, // Store base64 data URLs
         answers: Object.entries(answers).map(([questionId, answer]) => ({
           questionId,
           answer,
