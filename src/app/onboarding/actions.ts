@@ -1,7 +1,8 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, signToken } from "@/lib/auth";
 
 interface OnboardingData {
   name: string;
@@ -79,6 +80,22 @@ export async function completeOnboarding(data: OnboardingData) {
         skipDuplicates: true,
       });
     }
+
+    // Re-issue JWT with updated status so middleware allows navigation
+    const newToken = signToken({
+      userId: user.id,
+      role: user.role,
+      status: "ACTIVE",
+    });
+
+    const cookieStore = await cookies();
+    cookieStore.set("blackout_token", newToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 30 * 24 * 60 * 60, // 30 days
+      path: "/",
+    });
 
     return { success: true };
   } catch (error) {

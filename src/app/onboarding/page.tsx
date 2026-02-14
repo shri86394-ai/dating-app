@@ -165,6 +165,7 @@ export default function OnboardingPage() {
 
       if (result.success) {
         toast.success("Profile created! Welcome to Blackout.");
+        router.refresh(); // Clear Next.js cache so new JWT/status is picked up
         router.push("/match");
       } else {
         toast.error(result.error || "Failed to complete onboarding");
