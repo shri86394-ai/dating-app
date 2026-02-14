@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -24,9 +25,10 @@ import {
   Check,
   Loader2,
   Sparkles,
+  User,
 } from "lucide-react";
 import { toast } from "sonner";
-import { completeOnboarding } from "./actions";
+import { completeOnboarding, getOnboardingProfile } from "./actions";
 
 const INTERESTS = [
   "Hiking",
@@ -52,12 +54,15 @@ interface Question {
   questionText: string;
   questionType: "MULTIPLE_CHOICE" | "SCALE" | "SHORT_TEXT";
   options: string[] | null;
+  existingAnswer?: string | null;
 }
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isEditMode, setIsEditMode] = useState(false);
 
   // Step 1: Basic info
   const [name, setName] = useState("");
@@ -78,6 +83,35 @@ export default function OnboardingPage() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [weeklySetId, setWeeklySetId] = useState<string>("");
 
+  // Load existing profile data on mount
+  useEffect(() => {
+    async function loadProfile() {
+      try {
+        const profile = await getOnboardingProfile();
+        if (profile) {
+          if (profile.status === "ACTIVE") {
+            // User already onboarded — redirect to profile
+            router.replace("/profile");
+            return;
+          }
+          // Pre-fill any existing data (partial onboarding)
+          if (profile.name) setName(profile.name);
+          if (profile.dateOfBirth) setDateOfBirth(profile.dateOfBirth);
+          if (profile.gender) setGender(profile.gender);
+          if (profile.preference) setPreference(profile.preference);
+          if (profile.bio) setBio(profile.bio);
+          if (profile.interests.length > 0)
+            setSelectedInterests(profile.interests);
+        }
+      } catch {
+        // Ignore errors loading profile
+      } finally {
+        setInitialLoading(false);
+      }
+    }
+    loadProfile();
+  }, [router]);
+
   // Fetch questions when reaching step 4
   useEffect(() => {
     if (step === 4 && questions.length === 0) {
@@ -90,8 +124,20 @@ export default function OnboardingPage() {
       const res = await fetch("/api/questions/current");
       const data = await res.json();
       if (res.ok) {
-        setQuestions(data.questions || []);
+        const qs = data.questions || [];
+        setQuestions(qs);
         setWeeklySetId(data.weeklySetId || "");
+
+        // Pre-fill existing answers if any
+        const prefilled: Record<string, string> = {};
+        for (const q of qs) {
+          if (q.existingAnswer) {
+            prefilled[q.id] = q.existingAnswer;
+          }
+        }
+        if (Object.keys(prefilled).length > 0) {
+          setAnswers((prev) => ({ ...prefilled, ...prev }));
+        }
       } else {
         toast.error("Failed to load questions");
       }
@@ -164,8 +210,12 @@ export default function OnboardingPage() {
       });
 
       if (result.success) {
-        toast.success("Profile created! Welcome to Blackout.");
-        router.refresh(); // Clear Next.js cache so new JWT/status is picked up
+        if (result.isNewOnboarding) {
+          toast.success("Profile created! Welcome to Blackout.");
+        } else {
+          toast.success("Profile updated!");
+        }
+        router.refresh();
         router.push("/match");
       } else {
         toast.error(result.error || "Failed to complete onboarding");
@@ -175,6 +225,17 @@ export default function OnboardingPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (initialLoading) {
+    return (
+      <div className="min-h-dvh bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
   }
 
   const totalSteps = 4;
@@ -189,15 +250,24 @@ export default function OnboardingPage() {
             <span className="text-sm font-medium text-muted-foreground">
               Step {step} of {totalSteps}
             </span>
-            <span className="text-sm font-medium text-primary">
+            <Link
+              href="/profile"
+              className="text-sm font-medium text-primary hover:underline flex items-center gap-1"
+            >
+              <User className="h-3.5 w-3.5" />
+              {isEditMode ? "Back to Profile" : "Go to Profile"}
+            </Link>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="h-2 w-full rounded-full bg-secondary flex-1">
+              <div
+                className="h-2 rounded-full bg-primary transition-all duration-500 ease-out"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <span className="text-xs font-medium text-primary w-8 text-right">
               {Math.round(progress)}%
             </span>
-          </div>
-          <div className="h-2 w-full rounded-full bg-secondary">
-            <div
-              className="h-2 rounded-full bg-primary transition-all duration-500 ease-out"
-              style={{ width: `${progress}%` }}
-            />
           </div>
         </div>
       </div>
@@ -533,12 +603,12 @@ export default function OnboardingPage() {
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating profile...
+                  {isEditMode ? "Saving..." : "Creating profile..."}
                 </>
               ) : (
                 <>
                   <Check className="mr-2 h-4 w-4" />
-                  Complete Setup
+                  {isEditMode ? "Save Changes" : "Complete Setup"}
                 </>
               )}
             </Button>

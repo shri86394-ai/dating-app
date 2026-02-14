@@ -95,6 +95,14 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // ACTIVE users who land on /onboarding should be redirected to /match
+  if (
+    payload.status === "ACTIVE" &&
+    (pathname === "/onboarding" || pathname.startsWith("/onboarding/"))
+  ) {
+    return NextResponse.redirect(new URL("/match", request.url));
+  }
+
   // ADMIN users accessing root (/) get redirected to /admin
   if (payload.role === "ADMIN" && pathname === "/") {
     return NextResponse.redirect(new URL("/admin", request.url));

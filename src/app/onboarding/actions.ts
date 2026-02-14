@@ -16,6 +16,28 @@ interface OnboardingData {
   weeklySetId: string;
 }
 
+export async function getOnboardingProfile() {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return null;
+
+    return {
+      name: user.name || "",
+      dateOfBirth: user.dateOfBirth
+        ? user.dateOfBirth.toISOString().split("T")[0]
+        : "",
+      gender: user.gender || "",
+      preference: user.preference || "",
+      bio: user.bio || "",
+      interests: user.interests || [],
+      photos: user.photos || [],
+      status: user.status,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function completeOnboarding(data: OnboardingData) {
   try {
     const user = await getCurrentUser();
@@ -24,9 +46,7 @@ export async function completeOnboarding(data: OnboardingData) {
       return { success: false, error: "Not authenticated" };
     }
 
-    if (user.status !== "ONBOARDING") {
-      return { success: false, error: "User already onboarded" };
-    }
+    const isNewOnboarding = user.status === "ONBOARDING";
 
     // Validate age (must be 18+)
     const dob = new Date(data.dateOfBirth);
@@ -67,6 +87,14 @@ export async function completeOnboarding(data: OnboardingData) {
 
     // Save questionnaire answers if provided
     if (data.weeklySetId && data.answers.length > 0) {
+      // Delete existing answers for this user/week set to allow re-answering
+      await prisma.questionAnswer.deleteMany({
+        where: {
+          userId: user.id,
+          weeklySetId: data.weeklySetId,
+        },
+      });
+
       const answerData = data.answers.map((a) => ({
         userId: user.id,
         questionId: a.questionId,
@@ -74,30 +102,30 @@ export async function completeOnboarding(data: OnboardingData) {
         answer: a.answer,
       }));
 
-      // Use createMany to batch insert, skip duplicates
       await prisma.questionAnswer.createMany({
         data: answerData,
-        skipDuplicates: true,
       });
     }
 
     // Re-issue JWT with updated status so middleware allows navigation
-    const newToken = signToken({
-      userId: user.id,
-      role: user.role,
-      status: "ACTIVE",
-    });
+    if (isNewOnboarding) {
+      const newToken = signToken({
+        userId: user.id,
+        role: user.role,
+        status: "ACTIVE",
+      });
 
-    const cookieStore = await cookies();
-    cookieStore.set("blackout_token", newToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60, // 30 days
-      path: "/",
-    });
+      const cookieStore = await cookies();
+      cookieStore.set("blackout_token", newToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 30 * 24 * 60 * 60, // 30 days
+        path: "/",
+      });
+    }
 
-    return { success: true };
+    return { success: true, isNewOnboarding };
   } catch (error) {
     console.error("Onboarding error:", error);
     return { success: false, error: "Failed to complete onboarding" };
