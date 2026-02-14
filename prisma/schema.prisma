@@ -1,0 +1,241 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ──────────────────────────────────────────────
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  OTHER
+}
+
+enum GenderPreference {
+  MALE
+  FEMALE
+  EVERYONE
+}
+
+enum UserStatus {
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  SCALE
+  SHORT_TEXT
+}
+
+enum MatchStatus {
+  ACTIVE
+  COMPLETED
+  REPORTED
+  ADMIN_OVERRIDE
+}
+
+enum MatchAssignedBy {
+  ALGORITHM
+  ADMIN
+}
+
+enum ReportStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportPriority {
+  NORMAL
+  HIGH
+}
+
+enum AdminActionType {
+  WARN
+  SUSPEND
+  BAN
+  REINSTATE
+  DISMISS_REPORT
+}
+
+// ─── Models ─────────────────────────────────────────────
+
+model User {
+  id              String           @id @default(cuid())
+  phone           String           @unique
+  name            String?
+  dateOfBirth     DateTime?        @map("date_of_birth")
+  gender          Gender?
+  preference      GenderPreference?
+  bio             String?
+  location        String?
+  latitude        Float?
+  longitude       Float?
+  photos          String[]         @default([])
+  interests       String[]         @default([])
+  status          UserStatus       @default(ONBOARDING)
+  role            UserRole         @default(USER)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  // OTP
+  otpCode         String?          @map("otp_code")
+  otpExpiresAt    DateTime?        @map("otp_expires_at")
+
+  // Relations
+  answers         QuestionAnswer[]
+  matchesAsA      Match[]          @relation("MatchUserA")
+  matchesAsB      Match[]          @relation("MatchUserB")
+  sentMessages    Message[]        @relation("MessageSender")
+  reportsFiled    Report[]         @relation("ReportReporter")
+  reportsAgainst  Report[]         @relation("ReportReported")
+  adminActions    AdminAction[]    @relation("AdminActionAdmin")
+  actionsAgainst  AdminAction[]    @relation("AdminActionTarget")
+
+  @@map("users")
+}
+
+model QuestionBank {
+  id            String       @id @default(cuid())
+  questionText  String       @map("question_text")
+  questionType  QuestionType @map("question_type")
+  options       Json?        // Array of options for MULTIPLE_CHOICE
+  active        Boolean      @default(true)
+  usageCount    Int          @default(0) @map("usage_count")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  weeklySetItems WeeklyQuestionSetItem[]
+  answers        QuestionAnswer[]
+
+  @@map("question_bank")
+}
+
+model WeeklyQuestionSet {
+  id          String    @id @default(cuid())
+  weekStart   DateTime  @map("week_start")
+  weekEnd     DateTime  @map("week_end")
+  isFinalized Boolean   @default(false) @map("is_finalized")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  questions   WeeklyQuestionSetItem[]
+  answers     QuestionAnswer[]
+
+  @@map("weekly_question_sets")
+}
+
+model WeeklyQuestionSetItem {
+  id              String            @id @default(cuid())
+  weeklySetId     String            @map("weekly_set_id")
+  questionId      String            @map("question_id")
+  orderIndex      Int               @map("order_index")
+
+  weeklySet       WeeklyQuestionSet @relation(fields: [weeklySetId], references: [id], onDelete: Cascade)
+  question        QuestionBank      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([weeklySetId, questionId])
+  @@map("weekly_question_set_items")
+}
+
+model QuestionAnswer {
+  id            String            @id @default(cuid())
+  userId        String            @map("user_id")
+  questionId    String            @map("question_id")
+  weeklySetId   String            @map("weekly_set_id")
+  answer        Json              // Value depends on question type
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question      QuestionBank      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  weeklySet     WeeklyQuestionSet @relation(fields: [weeklySetId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questionId, weeklySetId])
+  @@map("question_answers")
+}
+
+model Match {
+  id            String          @id @default(cuid())
+  userAId       String          @map("user_a_id")
+  userBId       String          @map("user_b_id")
+  weekStart     DateTime        @map("week_start")
+  weekEnd       DateTime        @map("week_end")
+  status        MatchStatus     @default(ACTIVE)
+  compatibility Float           @default(0)
+  assignedBy    MatchAssignedBy @default(ALGORITHM) @map("assigned_by")
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  userA         User            @relation("MatchUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB         User            @relation("MatchUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages      Message[]
+  reports       Report[]
+
+  @@map("matches")
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  matchId     String   @map("match_id")
+  senderId    String   @map("sender_id")
+  content     String
+  isRead      Boolean  @default(false) @map("is_read")
+  isFlagged   Boolean  @default(false) @map("is_flagged")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  match       Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  sender      User     @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Report {
+  id              String         @id @default(cuid())
+  reporterId      String         @map("reporter_id")
+  reportedId      String         @map("reported_id")
+  matchId         String         @map("match_id")
+  reason          String
+  details         String?
+  flaggedMessages String[]       @default([]) @map("flagged_messages")
+  status          ReportStatus   @default(OPEN)
+  priority        ReportPriority @default(NORMAL)
+  adminNotes      String?        @map("admin_notes")
+  resolvedBy      String?        @map("resolved_by")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  reporter        User           @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported        User           @relation("ReportReported", fields: [reportedId], references: [id], onDelete: Cascade)
+  match           Match          @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@map("reports")
+}
+
+model AdminAction {
+  id            String          @id @default(cuid())
+  adminId       String          @map("admin_id")
+  targetUserId  String          @map("target_user_id")
+  actionType    AdminActionType @map("action_type")
+  reason        String
+  metadata      Json?           // e.g. suspension duration
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  admin         User            @relation("AdminActionAdmin", fields: [adminId], references: [id], onDelete: Cascade)
+  targetUser    User            @relation("AdminActionTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@map("admin_actions")
+}
